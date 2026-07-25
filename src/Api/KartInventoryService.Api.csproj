@@ -1,0 +1,74 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FluentValidation.AspNetCore" Version="11.3.0" />
+    <PackageReference Include="MediatR" Version="12.4.1" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.10" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.10">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="8.0.1" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
+  </ItemGroup>
+
+  <!--
+    Internal gRPC surface (api-contract.yaml's InventoryAvailabilityService, consumed only by
+    kart-cart-service's checkout-time validation call) - Grpc.AspNetCore.Server plus the tooling
+    package that compiles Protos/inventory_availability.proto at build time (no protoc CLI needed).
+  -->
+  <ItemGroup>
+    <PackageReference Include="Grpc.AspNetCore" Version="2.66.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Protobuf Include="Protos\inventory_availability.proto" GrpcServices="Server" />
+  </ItemGroup>
+
+  <!--
+    observability-standards.md: Serilog (structured JSON logs -> Loki via the OTel Collector) +
+    the OpenTelemetry SDK (traces -> Tempo, metrics -> Prometheus) - kart-conventions.md's
+    Observability section, same stack every one of Kart's 18 services uses identically.
+    Kart.Shared.Observability doesn't exist as a published package yet (kart-shared repo), so
+    this wires the same shape locally (mirrors kart-identity-service/kart-category-service's own
+    ObservabilityExtensions), ready to be swapped for the shared package later.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+    <PackageReference Include="Serilog.Formatting.Compact" Version="3.0.0" />
+    <PackageReference Include="Serilog.Enrichers.Environment" Version="3.0.1" />
+    <PackageReference Include="Serilog.Enrichers.Span" Version="3.1.0" />
+    <PackageReference Include="Serilog.Settings.Configuration" Version="10.0.1" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.17.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.17.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.17.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.EntityFrameworkCore" Version="1.17.0-beta.1" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.StackExchangeRedis" Version="1.17.0-beta.1" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.17.0" />
+    <PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" Version="1.17.0-beta.1" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.17.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Application\KartInventoryService.Application.csproj" />
+    <ProjectReference Include="..\Infrastructure\KartInventoryService.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <!--
+    contracts/message-bus-manifest.json is this service's single source of truth for its
+    RabbitMQ topology - copied here so RabbitMqOptions.ManifestPath (resolved against
+    AppContext.BaseDirectory) finds it at runtime without a "../../contracts" relative
+    path that would break once this service is deployed as its own container image.
+  -->
+  <ItemGroup>
+    <Content Include="..\..\contracts\message-bus-manifest.json" Link="message-bus-manifest.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

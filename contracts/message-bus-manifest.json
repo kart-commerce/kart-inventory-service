@@ -1,0 +1,37 @@
+{
+  "service": "kart-inventory-service",
+  "exchanges": [
+    { "name": "inventory.exchange", "type": "topic", "durable": true },
+    { "name": "inventory.dlx", "type": "topic", "durable": true }
+  ],
+  "externalExchanges": [
+    { "name": "order.exchange", "type": "topic", "durable": true }
+  ],
+  "publishedEvents": [
+    { "eventType": "InventoryReserved", "exchange": "inventory.exchange", "routingKey": "inventory.reservation.reserved" },
+    { "eventType": "InventoryReservationFailed", "exchange": "inventory.exchange", "routingKey": "inventory.reservation.failed" },
+    { "eventType": "InventoryReleased", "exchange": "inventory.exchange", "routingKey": "inventory.reservation.released" },
+    { "eventType": "InventoryReplenished", "exchange": "inventory.exchange", "routingKey": "inventory.stock.replenished" }
+  ],
+  "queues": [
+    {
+      "name": "inventory.order-events.queue",
+      "durable": true,
+      "bindings": [
+        { "exchange": "order.exchange", "routingKey": "order.order.cancelled" },
+        { "exchange": "order.exchange", "routingKey": "order.order.compensation-triggered" }
+      ],
+      "deadLetter": { "exchange": "inventory.dlx", "routingKey": "inventory.order-events.dlq" },
+      "retryLadder": {
+        "requeueTo": "inventory.order-events.queue",
+        "tiers": [
+          { "name": "inventory.order-events.retry.30s", "ttlMs": 30000 }
+        ]
+      }
+    }
+  ],
+  "deadLetterQueues": [
+    { "name": "inventory.order-events.dlq", "exchange": "inventory.dlx", "routingKey": "inventory.order-events.dlq" }
+  ],
+  "_comment": "Source of truth for this service's entire RabbitMQ topology (event-contract.md, message-bus-manifest.json draft in kart-platform/docs/services/kart-inventory-service/). Nothing here is hardcoded in C# - RabbitMqTopologyProvisioner scans this file and declares every exchange/queue/binding/DLQ/retry-tier at startup, exactly like kart-identity-service and kart-category-service. Per-event DLQ names in event-contract.md (inventory.reserved.dlq, inventory.reservation-failed.dlq, inventory.released.dlq, inventory.replenished.dlq) belong to each *consumer's* own queue topology (Order/Cart/Analytics), not to this service's - mirrors kart-category-service's identical convention for CategoryUpdated's consumers."
+}

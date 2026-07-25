@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+option csharp_namespace = "KartInventoryService.Api.Grpc";
+
+package kart.inventory.v1;
+
+// Internal gRPC surface, consumed only by kart-cart-service's checkout-time lazy validation call
+// (contracts/api-contract.yaml's commented proto block; architecture.md's "API Surface
+// Consistency Note - Resolved"). Read-only: never reserves, never takes a write lock, reads
+// through the same short-TTL cache-aside path as GET /inventory/{sku}.
+service InventoryAvailabilityService {
+  rpc CheckAvailability(CheckAvailabilityRequest) returns (CheckAvailabilityResponse);
+}
+
+message CheckAvailabilityRequest {
+  string sku = 1;
+  int32 requested_qty = 2;
+}
+
+message CheckAvailabilityResponse {
+  string sku = 1;
+  int32 available_qty = 2;
+  // available_qty >= requested_qty at read time - advisory only, re-checked authoritatively by
+  // POST /inventory/reserve's own lock at checkout.
+  bool sufficient = 3;
+}
