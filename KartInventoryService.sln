@@ -5,6 +5,13 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{2BCD92D9-EDE9-405E-A3D5-1EAF6C808F3A}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "contracts", "contracts", "{3F6A1B2C-4D5E-4F60-9A7B-8C9D0E1F2A3B}"
+	ProjectSection(SolutionItems) = preProject
+		contracts\api-contract.yaml = contracts\api-contract.yaml
+		contracts\message-bus-manifest.json = contracts\message-bus-manifest.json
+		contracts\README.md = contracts\README.md
+	EndProjectSection
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KartInventoryService.Api", "src\Api\KartInventoryService.Api.csproj", "{9959922E-FE30-476B-BAE1-69AEE35083E6}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KartInventoryService.Application", "src\Application\KartInventoryService.Application.csproj", "{389CD723-BB1E-4C03-A95B-EA3D85F619D9}"
