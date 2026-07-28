@@ -1,4 +1,5 @@
 using System.Text;
+using Kart.Shared.Messaging;
 using KartInventoryService.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
