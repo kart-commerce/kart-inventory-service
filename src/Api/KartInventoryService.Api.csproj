@@ -32,28 +32,19 @@
   </ItemGroup>
 
   <!--
-    observability-standards.md: Serilog (structured JSON logs -> Loki via the OTel Collector) +
-    the OpenTelemetry SDK (traces -> Tempo, metrics -> Prometheus) - kart-conventions.md's
-    Observability section, same stack every one of Kart's 18 services uses identically.
-    Kart.Shared.Observability doesn't exist as a published package yet (kart-shared repo), so
-    this wires the same shape locally (mirrors kart-identity-service/kart-category-service's own
-    ObservabilityExtensions), ready to be swapped for the shared package later.
+    kart-conventions.md Observability section: Kart.Shared.Observability wires Serilog + the
+    OpenTelemetry SDK behind one DI call - never reimplemented per service.
+    Kart.Shared.Configuration wires the GlobalConfig external-secrets-file bootstrap (see
+    appsettings.Local.json.example). OpenTelemetry.Extensions.Hosting is kept as a direct
+    reference (rather than relying on it transitively) because Program.cs calls
+    ConfigureOpenTelemetryTracerProvider/AlwaysOnSampler directly to force 100%-trace sampling
+    (kart-inventory-service is one of the four Order-Saga participants required to sample at
+    100% - see Kart.Shared.Observability's README "100%-trace-coverage services" section).
   -->
   <ItemGroup>
-    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
-    <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
-    <PackageReference Include="Serilog.Formatting.Compact" Version="3.0.0" />
-    <PackageReference Include="Serilog.Enrichers.Environment" Version="3.0.1" />
-    <PackageReference Include="Serilog.Enrichers.Span" Version="3.1.0" />
-    <PackageReference Include="Serilog.Settings.Configuration" Version="10.0.1" />
+    <PackageReference Include="Kart.Shared.Configuration" Version="0.1.0" />
+    <PackageReference Include="Kart.Shared.Observability" Version="0.2.0" />
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.17.0" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.17.0" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.17.0" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.EntityFrameworkCore" Version="1.17.0-beta.1" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.StackExchangeRedis" Version="1.17.0-beta.1" />
-    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.17.0" />
-    <PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" Version="1.17.0-beta.1" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.17.0" />
   </ItemGroup>
 
   <ItemGroup>

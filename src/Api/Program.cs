@@ -1,14 +1,30 @@
 using KartInventoryService.Api.Grpc;
 using KartInventoryService.Api.Middleware;
-using KartInventoryService.Api.Observability;
 using KartInventoryService.Api.Security;
 using KartInventoryService.Application;
 using KartInventoryService.Infrastructure;
+using Kart.Shared.Configuration;
+using Kart.Shared.Observability;
+using OpenTelemetry.Trace;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.AddObservability();
+// kart-conventions.md Configuration Management: GlobalConfig external-secrets-file bootstrap,
+// shared across every service - never reimplemented per service. See appsettings.Local.json.example.
+builder.AddKartGlobalConfig();
+
+// kart-conventions.md Observability section: Serilog + OpenTelemetry SDK behind one DI call.
+builder.AddKartObservability("kart-inventory-service");
+
+// Kart.Shared.Observability doesn't yet expose a sampling-tier knob (see its README's "Known
+// gap"/100%-trace-coverage note) - kart-inventory-service is one of the four Order-Saga
+// participants (alongside kart-order-service/kart-payment-service/kart-shipping-service) required
+// by kart-conventions.md to sample 100% of traces, since reserve/release is a synchronous step
+// directly on the Order Saga's critical path. Re-apply the always-on sampler after
+// AddKartObservability has already built the tracer provider, until the shared package grows this
+// option itself.
+builder.Services.ConfigureOpenTelemetryTracerProvider(tracing => tracing.SetSampler(new AlwaysOnSampler()));
 
 // Add services to the container.
 
