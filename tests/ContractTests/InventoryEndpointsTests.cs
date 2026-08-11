@@ -139,4 +139,40 @@ public class InventoryEndpointsTests : IClassFixture<InventoryApiFactory>
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
+
+    [Fact]
+    public async Task GetOrderAllocations_WithAdminRole_Returns200WithContractShape()
+    {
+        var orderId = Guid.NewGuid();
+        var reservation = Reservation.Create(orderId, "SKU-ALLOC", 5, new[] { ("WH-1", 3), ("WH-2", 2) }, TimeSpan.FromMinutes(15), "service:order", Now).Value;
+        _factory.ReservationRepository.Seed(reservation);
+        var client = CreateClient("admin");
+
+        var response = await client.GetAsync($"/v1/inventory/orders/{orderId}/allocations");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = await response.Content.ReadAsStringAsync();
+        json.Should().Contain("\"reservationId\"").And.Contain("\"warehouseId\":\"WH-1\"").And.Contain("\"warehouseId\":\"WH-2\"");
+    }
+
+    [Fact]
+    public async Task GetOrderAllocations_WhenOrderHasNoReservations_Returns200WithEmptyArray()
+    {
+        var client = CreateClient("admin");
+
+        var response = await client.GetAsync($"/v1/inventory/orders/{Guid.NewGuid()}/allocations");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadAsStringAsync()).Should().Be("[]");
+    }
+
+    [Fact]
+    public async Task GetOrderAllocations_WithoutAdminRole_Returns403()
+    {
+        var client = CreateClient("service:order"); // a real role, just not admin
+
+        var response = await client.GetAsync($"/v1/inventory/orders/{Guid.NewGuid()}/allocations");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
 }

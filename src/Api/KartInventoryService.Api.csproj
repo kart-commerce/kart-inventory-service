@@ -43,7 +43,7 @@
   -->
   <ItemGroup>
     <PackageReference Include="Kart.Shared.Configuration" Version="0.2.0" />
-    <PackageReference Include="Kart.Shared.Observability" Version="0.2.0" />
+    <PackageReference Include="Kart.Shared.Observability" Version="0.3.0" />
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.17.0" />
   </ItemGroup>
 

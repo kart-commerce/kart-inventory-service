@@ -29,4 +29,13 @@ public interface IReservationRepository
     /// ReservationReleaseService.ReleaseAsync.
     /// </summary>
     Task<IReadOnlyList<Guid>> GetExpiredReservationIdsAsync(DateTimeOffset asOf, int batchSize, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Order Management (Admin) flow's "Assign Warehouse" view — every reservation (any status,
+    /// unlike <see cref="GetReservedByOrderIdAsync"/>'s live-only filter) for this order, with
+    /// Allocations eagerly loaded, so an admin can see which warehouse(s) actually fulfilled each
+    /// line item even after the reservation has since been released/expired. Plain (non-locking)
+    /// read — this is a read-only admin view, never a write path.
+    /// </summary>
+    Task<IReadOnlyList<Reservation>> GetByOrderIdAsync(Guid orderId, CancellationToken cancellationToken);
 }
