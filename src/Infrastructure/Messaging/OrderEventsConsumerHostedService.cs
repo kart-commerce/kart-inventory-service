@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Kart.Shared.Messaging;
 using KartInventoryService.Application.Features.ConsumeOrderCancelled;
 using KartInventoryService.Application.Features.ConsumeOrderCompensationTriggered;
 using MediatR;

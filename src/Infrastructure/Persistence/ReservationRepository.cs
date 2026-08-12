@@ -46,4 +46,11 @@ public sealed class ReservationRepository : IReservationRepository
             .Take(batchSize)
             .Select(r => r.ReservationId)
             .ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<Reservation>> GetByOrderIdAsync(Guid orderId, CancellationToken cancellationToken) =>
+        await _dbContext.Reservations
+            .AsNoTracking()
+            .Include(r => r.Allocations)
+            .Where(r => r.OrderId == orderId)
+            .ToListAsync(cancellationToken);
 }

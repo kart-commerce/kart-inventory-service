@@ -30,4 +30,7 @@ public sealed class InMemoryReservationRepository : IReservationRepository
             .Take(batchSize)
             .Select(r => r.ReservationId)
             .ToList());
+
+    public Task<IReadOnlyList<Reservation>> GetByOrderIdAsync(Guid orderId, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<Reservation>>(_reservations.Values.Where(r => r.OrderId == orderId).ToList());
 }
