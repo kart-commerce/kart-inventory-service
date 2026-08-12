@@ -34,6 +34,7 @@ public sealed class OrderEventsConsumerHostedService : BackgroundService
     private const string OrderCompensationTriggeredRoutingKey = "order.order.compensation-triggered";
     private const string OrderConfirmedRoutingKey = "order.order.confirmed";
     private const string RetryCountHeader = "x-inventory-retry-count";
+    private const string OriginalRoutingKeyHeader = "x-inventory-original-routing-key";
 
     private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(10);
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
@@ -96,8 +97,9 @@ public sealed class OrderEventsConsumerHostedService : BackgroundService
             using var scope = _scopeFactory.CreateScope();
             var sender = scope.ServiceProvider.GetRequiredService<ISender>();
             var json = Encoding.UTF8.GetString(deliverEventArgs.Body.Span);
+            var routingKey = GetEffectiveRoutingKey(deliverEventArgs);
 
-            switch (deliverEventArgs.RoutingKey)
+            switch (routingKey)
             {
                 case OrderCancelledRoutingKey:
                     var cancelled = JsonSerializer.Deserialize<OrderCancelledEventPayload>(json, SerializerOptions)
@@ -123,7 +125,7 @@ public sealed class OrderEventsConsumerHostedService : BackgroundService
                 default:
                     _logger.LogWarning(
                         "Unrecognized routing key {RoutingKey} on {Queue}; dead-lettering.",
-                        deliverEventArgs.RoutingKey,
+                        routingKey,
                         QueueName);
                     channel.BasicNack(deliverEventArgs.DeliveryTag, multiple: false, requeue: false);
                     return;
@@ -141,24 +143,37 @@ public sealed class OrderEventsConsumerHostedService : BackgroundService
     {
         var retryCount = GetRetryCount(deliverEventArgs.BasicProperties);
         var tiers = _manifest.GetQueue(QueueName).RetryLadder?.Tiers ?? Array.Empty<RetryTierDefinition>();
+        var routingKey = GetEffectiveRoutingKey(deliverEventArgs);
 
         if (retryCount < tiers.Count)
         {
             var tier = tiers[retryCount];
             var properties = channel.CreateBasicProperties();
             properties.Persistent = true;
-            properties.Headers = new Dictionary<string, object> { [RetryCountHeader] = retryCount + 1 };
+            properties.Headers = new Dictionary<string, object>
+            {
+                [RetryCountHeader] = retryCount + 1,
+                [OriginalRoutingKeyHeader] = routingKey,
+            };
 
             // Publishing via the default exchange with routingKey = the retry-tier queue's own
             // name delivers directly to it; its TTL + dead-letter-back-to-main-queue wiring
-            // (RabbitMqTopologyProvisioner) does the actual delayed redelivery.
+            // (RabbitMqTopologyProvisioner) does the actual delayed redelivery. That loop-back
+            // hop overwrites BasicDeliverEventArgs.RoutingKey with the retry-tier queue's own
+            // name (RabbitMQ's x-dead-letter-routing-key, set by RabbitMqTopologyProvisioner, has
+            // to point back at this queue's name for the ladder to work at all) - so the true
+            // original routing key must be carried in a header instead, or a retried message can
+            // never re-match the `switch` above and gets dead-lettered on its very next delivery
+            // regardless of how many tiers remain (confirmed live 2026-08-12 during Inventory &
+            // Stock Management flow testing; kart-product-service's RetryLadderDispatcher.cs is
+            // the precedent this mirrors).
             channel.BasicPublish(exchange: string.Empty, routingKey: tier.Name, basicProperties: properties, body: deliverEventArgs.Body);
             channel.BasicAck(deliverEventArgs.DeliveryTag, multiple: false);
 
             _logger.LogWarning(
                 ex,
                 "Handling {RoutingKey} failed; routed to retry tier {Tier} (attempt {Attempt}).",
-                deliverEventArgs.RoutingKey,
+                routingKey,
                 tier.Name,
                 retryCount + 1);
         }
@@ -167,7 +182,7 @@ public sealed class OrderEventsConsumerHostedService : BackgroundService
             _logger.LogCritical(
                 ex,
                 "Handling {RoutingKey} failed after exhausting all retry tiers; dead-lettering.",
-                deliverEventArgs.RoutingKey);
+                routingKey);
             channel.BasicNack(deliverEventArgs.DeliveryTag, multiple: false, requeue: false);
         }
     }
@@ -186,5 +201,18 @@ public sealed class OrderEventsConsumerHostedService : BackgroundService
         }
 
         return 0;
+    }
+
+    /// <summary>The routing key this message actually arrived with on its very first delivery, regardless of how many retry-ladder bounces it has since been through (see the remark in <see cref="HandleFailure"/>).</summary>
+    private static string GetEffectiveRoutingKey(BasicDeliverEventArgs deliverEventArgs)
+    {
+        if (deliverEventArgs.BasicProperties.Headers is not null
+            && deliverEventArgs.BasicProperties.Headers.TryGetValue(OriginalRoutingKeyHeader, out var value)
+            && value is byte[] bytes)
+        {
+            return Encoding.UTF8.GetString(bytes);
+        }
+
+        return deliverEventArgs.RoutingKey;
     }
 }
