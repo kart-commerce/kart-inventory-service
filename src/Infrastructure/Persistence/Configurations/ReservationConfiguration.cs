@@ -12,7 +12,7 @@ public sealed class ReservationConfiguration : IEntityTypeConfiguration<Reservat
         builder.ToTable("reservations", t =>
         {
             t.HasCheckConstraint("CK_reservations_qty_positive", "qty > 0");
-            t.HasCheckConstraint("CK_reservations_status", "status IN ('reserved', 'released', 'expired')");
+            t.HasCheckConstraint("CK_reservations_status", "status IN ('reserved', 'committed', 'released', 'expired')");
             t.HasCheckConstraint(
                 "CK_reservations_release_reason",
                 "release_reason IS NULL OR release_reason IN ('explicit_call', 'order_cancelled', 'compensation_triggered', 'ttl_expiry')");
@@ -43,9 +43,10 @@ public sealed class ReservationConfiguration : IEntityTypeConfiguration<Reservat
         builder.Property(r => r.CreatedBy).HasColumnName("created_by").HasColumnType("text").IsRequired();
         builder.Property(r => r.UpdatedBy).HasColumnName("updated_by").HasColumnType("text").IsRequired();
 
-        // OrderCancelled/OrderCompensationTriggered consumers' "find the live reservation(s) for
-        // this orderId" lookup - partial index, shrinks as reservations terminate.
-        builder.HasIndex(r => r.OrderId).HasDatabaseName("idx_reservations_order_id").HasFilter("status = 'reserved'");
+        // OrderCancelled/OrderCompensationTriggered/OrderConfirmed consumers' "find the live
+        // reservation(s) for this orderId" lookup - partial index, shrinks as reservations
+        // terminate. "Live" is Reserved OR Committed (see GetReservedByOrderIdAsync's doc comment).
+        builder.HasIndex(r => r.OrderId).HasDatabaseName("idx_reservations_order_id").HasFilter("status IN ('reserved', 'committed')");
 
         // The 60-second TTL sweep's "find every still-reserved hold whose expiry has passed" scan.
         builder.HasIndex(r => r.ExpiresAt).HasDatabaseName("idx_reservations_expiry_sweep").HasFilter("status = 'reserved'");
@@ -62,6 +63,7 @@ public sealed class ReservationConfiguration : IEntityTypeConfiguration<Reservat
     private static string ToStatusColumn(ReservationStatus status) => status switch
     {
         ReservationStatus.Reserved => "reserved",
+        ReservationStatus.Committed => "committed",
         ReservationStatus.Released => "released",
         ReservationStatus.Expired => "expired",
         _ => throw new InvalidOperationException($"Unknown reservation status '{status}'."),
@@ -70,6 +72,7 @@ public sealed class ReservationConfiguration : IEntityTypeConfiguration<Reservat
     private static ReservationStatus ParseStatus(string value) => value switch
     {
         "reserved" => ReservationStatus.Reserved,
+        "committed" => ReservationStatus.Committed,
         "released" => ReservationStatus.Released,
         "expired" => ReservationStatus.Expired,
         _ => throw new InvalidOperationException($"Unknown reservation status column value '{value}'."),

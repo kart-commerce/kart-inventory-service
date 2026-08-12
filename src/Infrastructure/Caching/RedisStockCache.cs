@@ -42,6 +42,13 @@ public sealed class RedisStockCache : IStockCache
         await database.StringSetAsync(Key(sku, warehouseId), json, _ttl);
     }
 
+    public async Task InvalidateAsync(string sku, string warehouseId, CancellationToken cancellationToken)
+    {
+        var database = _connectionMultiplexer.GetDatabase();
+        await database.KeyDeleteAsync(Key(sku, warehouseId));
+        await database.KeyDeleteAsync(Key(sku, warehouseId: null));
+    }
+
     private static string Key(string sku, string? warehouseId) =>
         warehouseId is null ? $"inventory:stock:{sku}" : $"inventory:stock:{sku}:{warehouseId}";
 }

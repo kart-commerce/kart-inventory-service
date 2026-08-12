@@ -16,11 +16,13 @@ public class ReservationReleaseServiceTests
     private readonly Mock<IReservationRepository> _reservationRepository = new();
     private readonly Mock<IWarehouseStockRepository> _stockRepository = new();
     private readonly Mock<IUnitOfWork> _unitOfWork = new();
+    private readonly Mock<IStockCache> _stockCache = new();
 
     private ReservationReleaseService CreateService() => new(
         _reservationRepository.Object,
         _stockRepository.Object,
         _unitOfWork.Object,
+        _stockCache.Object,
         TimeProvider.System,
         NullLogger<ReservationReleaseService>.Instance);
 

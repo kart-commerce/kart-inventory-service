@@ -79,4 +79,61 @@ public class ReservationTests
         // The reason recorded stays the first (explicit) release, not the second, no-op trigger.
         reservation.ReleaseReason.Should().Be(ReservationReleaseReason.ExplicitCall);
     }
+
+    [Fact]
+    public void Commit_WhenReserved_TransitionsToCommitted_AndRaisesInventoryCommitted()
+    {
+        var reservation = CreateReservation();
+        reservation.ClearDomainEvents();
+
+        var result = reservation.Commit(ActingPrincipal, Now.AddMinutes(1));
+
+        result.IsSuccess.Should().BeTrue();
+        reservation.Status.Should().Be(ReservationStatus.Committed);
+        reservation.DomainEvents.Should().ContainSingle().Which.Should().BeOfType<InventoryCommittedDomainEvent>();
+    }
+
+    [Fact]
+    public void Commit_WhenAlreadyCommitted_IsIdempotentNoOp_AndDoesNotRaiseASecondEvent()
+    {
+        var reservation = CreateReservation();
+        reservation.Commit(ActingPrincipal, Now.AddMinutes(1));
+        reservation.ClearDomainEvents();
+
+        var result = reservation.Commit(ActingPrincipal, Now.AddMinutes(2));
+
+        result.IsSuccess.Should().BeTrue();
+        reservation.DomainEvents.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Release_WhenCommitted_StillTransitionsToReleased_AndCreditsBack()
+    {
+        // A paid (Committed) order can still be admin-cancelled later - Committed only opts a
+        // reservation out of the TTL sweep, it must not become un-cancellable.
+        var reservation = CreateReservation();
+        reservation.Commit(ActingPrincipal, Now.AddMinutes(1));
+        reservation.ClearDomainEvents();
+
+        var result = reservation.Release(ReservationReleaseReason.OrderCancelled, "system:inventory-order-cancelled-consumer", Now.AddMinutes(2));
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Should().Be(ReleaseOutcome.Released);
+        reservation.Status.Should().Be(ReservationStatus.Released);
+        reservation.DomainEvents.Should().ContainSingle().Which.Should().BeOfType<InventoryReleasedDomainEvent>();
+    }
+
+    [Fact]
+    public void Commit_WhenAlreadyReleased_IsIdempotentNoOp()
+    {
+        var reservation = CreateReservation();
+        reservation.Release(ReservationReleaseReason.ExplicitCall, ActingPrincipal, Now.AddMinutes(1));
+        reservation.ClearDomainEvents();
+
+        var result = reservation.Commit("system:inventory-order-confirmed-consumer", Now.AddMinutes(2));
+
+        result.IsSuccess.Should().BeTrue();
+        reservation.Status.Should().Be(ReservationStatus.Released);
+        reservation.DomainEvents.Should().BeEmpty();
+    }
 }

@@ -20,6 +20,7 @@ public class ReserveStockCommandHandlerTests
     private readonly Mock<IReservationRepository> _reservationRepository = new();
     private readonly Mock<IUnitOfWork> _unitOfWork = new();
     private readonly Mock<IOutboxEventWriter> _outboxEventWriter = new();
+    private readonly Mock<IStockCache> _stockCache = new();
     private readonly Mock<ICurrentPrincipal> _currentPrincipal = new();
 
     private ReserveStockCommandHandler CreateHandler() => new(
@@ -27,6 +28,7 @@ public class ReserveStockCommandHandlerTests
         _reservationRepository.Object,
         _unitOfWork.Object,
         _outboxEventWriter.Object,
+        _stockCache.Object,
         _currentPrincipal.Object,
         TimeProvider.System,
         Options.Create(new InventoryOptions()),

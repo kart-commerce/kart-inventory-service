@@ -11,7 +11,11 @@
     { "eventType": "InventoryReserved", "exchange": "inventory.exchange", "routingKey": "inventory.reservation.reserved" },
     { "eventType": "InventoryReservationFailed", "exchange": "inventory.exchange", "routingKey": "inventory.reservation.failed" },
     { "eventType": "InventoryReleased", "exchange": "inventory.exchange", "routingKey": "inventory.reservation.released" },
-    { "eventType": "InventoryReplenished", "exchange": "inventory.exchange", "routingKey": "inventory.stock.replenished" }
+    { "eventType": "InventoryReplenished", "exchange": "inventory.exchange", "routingKey": "inventory.stock.replenished" },
+    { "eventType": "InventoryCommitted", "exchange": "inventory.exchange", "routingKey": "inventory.reservation.committed" },
+    { "eventType": "LowStockDetected", "exchange": "inventory.exchange", "routingKey": "inventory.stock.low-stock-detected" },
+    { "eventType": "InventoryReconciled", "exchange": "inventory.exchange", "routingKey": "inventory.stock.reconciled" },
+    { "eventType": "WarehouseStockProvisioned", "exchange": "inventory.exchange", "routingKey": "inventory.stock.provisioned" }
   ],
   "queues": [
     {
@@ -19,7 +23,8 @@
       "durable": true,
       "bindings": [
         { "exchange": "order.exchange", "routingKey": "order.order.cancelled" },
-        { "exchange": "order.exchange", "routingKey": "order.order.compensation-triggered" }
+        { "exchange": "order.exchange", "routingKey": "order.order.compensation-triggered" },
+        { "exchange": "order.exchange", "routingKey": "order.order.confirmed" }
       ],
       "deadLetter": { "exchange": "inventory.dlx", "routingKey": "inventory.order-events.dlq" },
       "retryLadder": {

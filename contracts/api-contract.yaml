@@ -21,6 +21,18 @@
 # this contract's own conventions exactly (Problem error shape, versioning, auth style). Flagged
 # here explicitly rather than silently invented - see this repo's README for the full note.
 #
+# Second Implementation Addendum (Inventory & Stock Management flow, added here, not upstream):
+# four more real gaps found during that flow's audit, closed the same way (AdminOnly-gated,
+# Problem error shape, versioning/auth style unchanged) - POST /inventory/provision (onboards a
+# brand-new (warehouseId, sku) row - previously only reachable via a migration seed), PATCH
+# /inventory/{warehouseId}/{sku}/threshold (the "Low Stock Threshold" stage - previously
+# settable only at provision time), POST /inventory/{warehouseId}/{sku}/reconcile (the "Stock
+# Audit/Reconciliation" and "Update Qty" stages - did not exist at all), and GET
+# /inventory/low-stock (the "Reorder Alert" dashboard view - previously a LogWarning only, never
+# queryable). The Reservation.status enum also gained `committed` (the "Deduct (Order Confirmed)"
+# stage - a reservation opts out of the TTL sweep once its order is paid, but must remain
+# releasable on a later cancellation).
+#
 # This contract has two surfaces: a public/gateway-reachable REST API
 # (reserve, release, read, replenish) and one internal gRPC service consumed only by
 # Cart's checkout-time lazy validation call (kart-cart-service/design-decisions.md,
@@ -208,6 +220,144 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Problem' }
 
+  /inventory/provision:
+    post:
+      operationId: provisionWarehouseStock
+      summary: Onboard a brand-new (warehouseId, sku) row (Inventory & Stock Management flow).
+      description: >
+        IMPLEMENTATION ADDENDUM - see file header. Previously only reachable via a migration
+        seed (ddd-model.md Modeling Decision 2). AdminOnly - master-data onboarding, distinct
+        from POST /inventory/replenish, which only credits an already-provisioned row.
+      security:
+        - clientCredentials: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [warehouseId, sku, initialQty, replenishmentThreshold, targetStockingLevel]
+              properties:
+                warehouseId: { type: string }
+                sku: { type: string }
+                initialQty: { type: integer, minimum: 0 }
+                replenishmentThreshold: { type: integer, minimum: 0 }
+                targetStockingLevel: { type: integer, minimum: 1 }
+      responses:
+        '201':
+          description: Provisioned; WarehouseStockProvisioned published.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockLevel' }
+        '400':
+          description: Already provisioned, or invalid quantities/thresholds.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /inventory/{warehouseId}/{sku}/threshold:
+    patch:
+      operationId: updateReplenishmentThreshold
+      summary: Update a warehouse/SKU's low-stock threshold and target stocking level (Inventory & Stock Management flow's "Low Stock Threshold" stage).
+      description: >
+        IMPLEMENTATION ADDENDUM - see file header. Config-only change (no InventoryOutboxEvent) -
+        a subsequent write crossing the new threshold raises LowStockDetected as usual.
+      security:
+        - clientCredentials: [admin]
+      parameters:
+        - name: warehouseId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: sku
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [replenishmentThreshold, targetStockingLevel]
+              properties:
+                replenishmentThreshold: { type: integer, minimum: 0 }
+                targetStockingLevel: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Threshold updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockLevel' }
+        '404':
+          description: (warehouseId, sku) has never been provisioned.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /inventory/{warehouseId}/{sku}/reconcile:
+    post:
+      operationId: reconcileStock
+      summary: Overwrite AvailableQty to an admin-submitted physical count (Inventory & Stock Management flow's "Stock Audit/Reconciliation" and "Update Qty" stages).
+      description: >
+        IMPLEMENTATION ADDENDUM - see file header. Unlike replenish/reserve, this write is
+        authoritative in either direction (can decrease stock, e.g. shrinkage) - publishes
+        InventoryReconciled with the signed variance (countedQty - previous AvailableQty).
+      security:
+        - clientCredentials: [admin]
+      parameters:
+        - name: warehouseId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: sku
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [countedQty, reason]
+              properties:
+                countedQty: { type: integer, minimum: 0 }
+                reason: { type: string }
+      responses:
+        '200':
+          description: Reconciled; InventoryReconciled published.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockReconciliationResult' }
+        '404':
+          description: (warehouseId, sku) has never been provisioned.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /inventory/low-stock:
+    get:
+      operationId: getLowStock
+      summary: List every SKU/warehouse currently below its own replenishment threshold (Inventory & Stock Management flow's "Reorder Alert" dashboard view).
+      description: >
+        IMPLEMENTATION ADDENDUM - see file header. Previously this signal was a LogWarning only,
+        never queryable. Public read (CanRead unconditional), same posture as GET /inventory/{sku}.
+      security: []
+      parameters:
+        - name: warehouseId
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: Every currently-below-threshold (warehouseId, sku) row, empty array if none.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/StockLevel' }
+
   /inventory/orders/{orderId}/allocations:
     get:
       operationId: getOrderAllocations
@@ -260,7 +410,11 @@ components:
         qty: { type: integer }
         status:
           type: string
-          enum: [reserved, released, expired]
+          enum: [reserved, committed, released, expired]
+          description: >
+            committed (Inventory & Stock Management flow's "Deduct (Order Confirmed)" stage,
+            added here) means the order backing this reservation has been paid - it is no longer
+            subject to the TTL sweep, but remains releasable on a later admin cancellation.
         allocations:
           type: array
           description: One entry per warehouse this reservation drew from (ddd-model.md's WarehouseAllocation) - usually one, more than one only on the multi-warehouse fallback.
@@ -284,6 +438,18 @@ components:
           nullable: true
           description: Present only when the request scoped to one warehouse.
         availableQty: { type: integer }
+
+    StockReconciliationResult:
+      type: object
+      required: [sku, warehouseId, previousQty, countedQty, variance]
+      properties:
+        sku: { type: string }
+        warehouseId: { type: string }
+        previousQty: { type: integer }
+        countedQty: { type: integer }
+        variance:
+          type: integer
+          description: countedQty - previousQty. Positive = found more than the ledger showed, negative = shrinkage.
 
     Problem:
       type: object

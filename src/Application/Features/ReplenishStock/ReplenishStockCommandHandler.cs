@@ -10,6 +10,7 @@ public sealed class ReplenishStockCommandHandler : IRequestHandler<ReplenishStoc
 {
     private readonly IWarehouseStockRepository _repository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IStockCache _stockCache;
     private readonly ICurrentPrincipal _currentPrincipal;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<ReplenishStockCommandHandler> _logger;
@@ -17,12 +18,14 @@ public sealed class ReplenishStockCommandHandler : IRequestHandler<ReplenishStoc
     public ReplenishStockCommandHandler(
         IWarehouseStockRepository repository,
         IUnitOfWork unitOfWork,
+        IStockCache stockCache,
         ICurrentPrincipal currentPrincipal,
         TimeProvider timeProvider,
         ILogger<ReplenishStockCommandHandler> logger)
     {
         _repository = repository;
         _unitOfWork = unitOfWork;
+        _stockCache = stockCache;
         _currentPrincipal = currentPrincipal;
         _timeProvider = timeProvider;
         _logger = logger;
@@ -32,6 +35,13 @@ public sealed class ReplenishStockCommandHandler : IRequestHandler<ReplenishStoc
     {
         var now = _timeProvider.GetUtcNow();
         var actingPrincipal = _currentPrincipal.ActingPrincipal;
+
+        _logger.LogInformation(
+            "Stage {Stage}: replenish requested for warehouse {WarehouseId}, sku {Sku}, qty {QtyAdded}.",
+            "ReplenishStockHandlerStarted",
+            request.WarehouseId,
+            request.Sku,
+            request.QtyAdded);
 
         await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
@@ -54,8 +64,11 @@ public sealed class ReplenishStockCommandHandler : IRequestHandler<ReplenishStoc
 
         if (stock.AvailableQty < stock.ReplenishmentThreshold)
         {
-            _logger.LogWarning(
-                "Sku {Sku} in warehouse {WarehouseId} is still below its replenishment threshold ({AvailableQty} < {Threshold}) after replenishment.",
+            // WarehouseStock.Replenish already raised LowStockDetected (a real published event) -
+            // this is the Application-layer Stage log for the same still-below-threshold state.
+            _logger.LogInformation(
+                "Stage {Stage}: sku {Sku} in warehouse {WarehouseId} is still below its replenishment threshold ({AvailableQty} < {Threshold}) after replenishment.",
+                "LowStockThresholdBreached",
                 stock.Sku,
                 stock.WarehouseId,
                 stock.AvailableQty,
@@ -66,6 +79,14 @@ public sealed class ReplenishStockCommandHandler : IRequestHandler<ReplenishStoc
         // DomainEvents-scanning SaveChanges override) in one commit.
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         await _unitOfWork.CommitTransactionAsync(cancellationToken);
+        _logger.LogInformation(
+            "Stage {Stage}: warehouse {WarehouseId}, sku {Sku} replenished to {AvailableQty} (outbox row saved).",
+            "InventoryReplenishedOutboxEventSaved",
+            stock.WarehouseId,
+            stock.Sku,
+            stock.AvailableQty);
+
+        await _stockCache.InvalidateAsync(stock.Sku, stock.WarehouseId, cancellationToken);
 
         return Result.Success(new StockLevelDto(stock.Sku, stock.WarehouseId, stock.AvailableQty));
     }

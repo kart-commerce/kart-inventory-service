@@ -48,11 +48,12 @@ public sealed class WarehouseStock : DomainEventEmitter
     }
 
     /// <summary>
-    /// Initial-load provisioning only (ddd-model.md Modeling Decision 2; tickets.md's flagged
-    /// gap: no admin endpoint/ticket exists for onboarding warehouse/SKU master data) - never
-    /// reachable through a public API, only through a migration seed or an equivalent trusted
-    /// initial-load process (database-design.md's created_by comment: "Admin operator or an
-    /// initial-load process").
+    /// Onboards a brand-new (WarehouseId, Sku) row. Originally "never reachable through a public
+    /// API, only through a migration seed" (tickets.md's flagged gap) - the Inventory &amp; Stock
+    /// Management flow closed that gap with a real AdminOnly-gated endpoint
+    /// (ProvisionWarehouseStockCommand); this factory itself is unchanged except that it now
+    /// raises WarehouseStockProvisioned so the onboarding is visible on the broker, not just in
+    /// the database.
     /// </summary>
     public static Result<WarehouseStock> Provision(
         string warehouseId,
@@ -73,7 +74,9 @@ public sealed class WarehouseStock : DomainEventEmitter
             return Result.Failure<WarehouseStock>(Error.Validation("Stock quantities/thresholds must be non-negative (target must be positive)."));
         }
 
-        return Result.Success(new WarehouseStock(warehouseId, sku, initialQty, replenishmentThreshold, targetStockingLevel, actingPrincipal, now));
+        var stock = new WarehouseStock(warehouseId, sku, initialQty, replenishmentThreshold, targetStockingLevel, actingPrincipal, now);
+        stock.Raise(new WarehouseStockProvisionedDomainEvent(warehouseId, sku, initialQty, now));
+        return Result.Success(stock);
     }
 
     /// <summary>
@@ -97,6 +100,7 @@ public sealed class WarehouseStock : DomainEventEmitter
 
         AvailableQty -= qty;
         Touch(actingPrincipal, now);
+        RaiseLowStockIfNeeded(now);
         return Result.Success();
     }
 
@@ -127,7 +131,72 @@ public sealed class WarehouseStock : DomainEventEmitter
         AvailableQty += qtyAdded;
         Touch(actingPrincipal, now);
         Raise(new InventoryReplenishedDomainEvent(Sku, qtyAdded, WarehouseId, now));
+        RaiseLowStockIfNeeded(now);
         return Result.Success();
+    }
+
+    /// <summary>
+    /// Inventory &amp; Stock Management flow's "Low Stock Threshold" stage: admin-adjustable
+    /// threshold/target, previously set only at Provision time with no update path. Config-only
+    /// change - raises no domain event (nothing downstream needs to react to a threshold change
+    /// itself; a subsequent write crossing the new threshold will raise LowStockDetected as usual).
+    /// </summary>
+    public Result UpdateThreshold(int replenishmentThreshold, int targetStockingLevel, string actingPrincipal, DateTimeOffset now)
+    {
+        if (replenishmentThreshold < 0 || targetStockingLevel <= 0)
+        {
+            return Result.Failure(Error.Validation("Threshold must be non-negative and target stocking level must be positive."));
+        }
+
+        ReplenishmentThreshold = replenishmentThreshold;
+        TargetStockingLevel = targetStockingLevel;
+        Touch(actingPrincipal, now);
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Inventory &amp; Stock Management flow's "Stock Audit/Reconciliation" stage (also serves as
+    /// this flow's "Update Qty" stage - the one write path that sets AvailableQty to an absolute
+    /// counted value rather than debiting/crediting it). Unlike TryDebit, a physical recount is
+    /// legitimately allowed to move AvailableQty in either direction, including matching what
+    /// TryDebit's oversell guard would otherwise reject - reconciliation is the authoritative
+    /// correction, not a demand that competes with the oversell invariant. Returns the signed
+    /// variance (countedQty - previous AvailableQty) for the caller to surface.
+    /// </summary>
+    public Result<int> Reconcile(int countedQty, string reason, string actingPrincipal, DateTimeOffset now)
+    {
+        if (countedQty < 0)
+        {
+            return Result.Failure<int>(Error.Validation("countedQty must be non-negative."));
+        }
+
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return Result.Failure<int>(Error.Validation("A reconciliation reason is required."));
+        }
+
+        var previousQty = AvailableQty;
+        var variance = countedQty - previousQty;
+        AvailableQty = countedQty;
+        Touch(actingPrincipal, now);
+        Raise(new InventoryReconciledDomainEvent(WarehouseId, Sku, previousQty, countedQty, variance, reason, now));
+        RaiseLowStockIfNeeded(now);
+        return Result.Success(variance);
+    }
+
+    /// <summary>
+    /// requirement-spec.md Decision 5's threshold-based reorder signal, promoted from a LogWarning
+    /// (Application-layer, now removed) to a real published event - Domain has zero framework
+    /// deps so it can't log itself, but it can raise. Fires every time a write leaves AvailableQty
+    /// below ReplenishmentThreshold, not only on the crossing - matches the pre-existing
+    /// LogWarning's own unconditional-below-threshold semantics.
+    /// </summary>
+    private void RaiseLowStockIfNeeded(DateTimeOffset now)
+    {
+        if (AvailableQty < ReplenishmentThreshold)
+        {
+            Raise(new LowStockDetectedDomainEvent(WarehouseId, Sku, AvailableQty, ReplenishmentThreshold, now));
+        }
     }
 
     private void Touch(string actingPrincipal, DateTimeOffset now)

@@ -52,6 +52,7 @@ public sealed class InventoryDbContext : DbContext
                 {
                     InventoryReservedDomainEvent reserved => InventoryOutboxEvent.ForReserved(reserved, reservation.ReservationId, reservation.UpdatedBy),
                     InventoryReleasedDomainEvent released => InventoryOutboxEvent.ForReleased(released, reservation.ReservationId, reservation.UpdatedBy),
+                    InventoryCommittedDomainEvent committed => InventoryOutboxEvent.ForCommitted(committed, reservation.ReservationId, reservation.UpdatedBy),
                     _ => throw new InvalidOperationException($"Unhandled Reservation domain event type '{domainEvent.GetType().Name}'."),
                 };
 
@@ -66,6 +67,9 @@ public sealed class InventoryDbContext : DbContext
                 var outboxEvent = domainEvent switch
                 {
                     InventoryReplenishedDomainEvent replenished => InventoryOutboxEvent.ForReplenished(replenished, $"{stock.WarehouseId}:{stock.Sku}", stock.UpdatedBy),
+                    LowStockDetectedDomainEvent lowStock => InventoryOutboxEvent.ForLowStockDetected(lowStock, stock.UpdatedBy),
+                    InventoryReconciledDomainEvent reconciled => InventoryOutboxEvent.ForReconciled(reconciled, stock.UpdatedBy),
+                    WarehouseStockProvisionedDomainEvent provisioned => InventoryOutboxEvent.ForProvisioned(provisioned, stock.UpdatedBy),
                     _ => throw new InvalidOperationException($"Unhandled WarehouseStock domain event type '{domainEvent.GetType().Name}'."),
                 };
 

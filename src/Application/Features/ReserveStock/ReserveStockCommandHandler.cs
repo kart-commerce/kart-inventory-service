@@ -16,6 +16,7 @@ public sealed class ReserveStockCommandHandler : IRequestHandler<ReserveStockCom
     private readonly IReservationRepository _reservationRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IOutboxEventWriter _outboxEventWriter;
+    private readonly IStockCache _stockCache;
     private readonly ICurrentPrincipal _currentPrincipal;
     private readonly TimeProvider _timeProvider;
     private readonly InventoryOptions _options;
@@ -26,6 +27,7 @@ public sealed class ReserveStockCommandHandler : IRequestHandler<ReserveStockCom
         IReservationRepository reservationRepository,
         IUnitOfWork unitOfWork,
         IOutboxEventWriter outboxEventWriter,
+        IStockCache stockCache,
         ICurrentPrincipal currentPrincipal,
         TimeProvider timeProvider,
         IOptions<InventoryOptions> options,
@@ -35,6 +37,7 @@ public sealed class ReserveStockCommandHandler : IRequestHandler<ReserveStockCom
         _reservationRepository = reservationRepository;
         _unitOfWork = unitOfWork;
         _outboxEventWriter = outboxEventWriter;
+        _stockCache = stockCache;
         _currentPrincipal = currentPrincipal;
         _timeProvider = timeProvider;
         _options = options.Value;
@@ -45,6 +48,13 @@ public sealed class ReserveStockCommandHandler : IRequestHandler<ReserveStockCom
     {
         var now = _timeProvider.GetUtcNow();
         var actingPrincipal = _currentPrincipal.ActingPrincipal;
+
+        _logger.LogInformation(
+            "Stage {Stage}: reserve requested for order {OrderId}, sku {Sku}, qty {Qty}.",
+            "ReserveStockHandlerStarted",
+            request.OrderId,
+            request.Sku,
+            request.Qty);
 
         await _unitOfWork.BeginTransactionAsync(cancellationToken);
         await _unitOfWork.SetLockTimeoutAsync(TimeSpan.FromMilliseconds(_options.LockTimeoutMs), cancellationToken);
@@ -87,11 +97,25 @@ public sealed class ReserveStockCommandHandler : IRequestHandler<ReserveStockCom
                 actingPrincipal,
                 cancellationToken);
 
+            _logger.LogWarning(
+                "Stage {Stage}: order {OrderId}, sku {Sku} - {Available} available, {Requested} requested.",
+                "InventoryReserveFailed",
+                request.OrderId,
+                request.Sku,
+                totalAvailable,
+                request.Qty);
+
             return Result.Failure<ReservationDto>(Error.InsufficientStock(
                 $"Insufficient stock for '{request.Sku}': {totalAvailable} available, {request.Qty} requested."));
         }
 
         var allocations = ChooseAllocations(candidates, request.Qty);
+        _logger.LogInformation(
+            "Stage {Stage}: order {OrderId}, sku {Sku} allocated across {WarehouseCount} warehouse(s).",
+            "WarehouseAllocationChosen",
+            request.OrderId,
+            request.Sku,
+            allocations.Count);
 
         foreach (var (warehouseId, allocatedQty) in allocations)
         {
@@ -107,17 +131,25 @@ public sealed class ReserveStockCommandHandler : IRequestHandler<ReserveStockCom
 
             if (stock.AvailableQty < stock.ReplenishmentThreshold)
             {
-                // requirement-spec.md Decision 5: threshold-based reorder signal, detected inside
-                // the same locked write that decremented stock, surfaced to procurement/admin
-                // tooling - not a fabricated automated supplier call.
-                _logger.LogWarning(
-                    "Sku {Sku} in warehouse {WarehouseId} crossed its replenishment threshold ({AvailableQty} < {Threshold}).",
+                // requirement-spec.md Decision 5: threshold-based reorder signal - WarehouseStock
+                // itself already raised LowStockDetected (a real published event, Domain has zero
+                // framework deps so can't log); this is the Application-layer Stage log for the
+                // same crossing, visible in Grafana alongside the rest of this request's story.
+                _logger.LogInformation(
+                    "Stage {Stage}: sku {Sku} in warehouse {WarehouseId} is below its replenishment threshold ({AvailableQty} < {Threshold}).",
+                    "LowStockThresholdBreached",
                     stock.Sku,
                     stock.WarehouseId,
                     stock.AvailableQty,
                     stock.ReplenishmentThreshold);
             }
         }
+
+        _logger.LogInformation(
+            "Stage {Stage}: order {OrderId}, sku {Sku} debited across every allocation.",
+            "WarehouseStockDebited",
+            request.OrderId,
+            request.Sku);
 
         var reservationResult = Reservation.Create(
             request.OrderId,
@@ -136,12 +168,30 @@ public sealed class ReserveStockCommandHandler : IRequestHandler<ReserveStockCom
 
         var reservation = reservationResult.Value;
         await _reservationRepository.AddAsync(reservation, cancellationToken);
+        _logger.LogInformation(
+            "Stage {Stage}: reservation {ReservationId} created for order {OrderId}.",
+            "ReservationPersisted",
+            reservation.ReservationId,
+            request.OrderId);
 
         // Writes the reservations/reservation_allocations rows, the warehouse_stock debits, and
         // the InventoryReserved outbox row (via DomainEvents-scanning SaveChanges override) all
         // in this one commit - the Outbox pattern's atomicity guarantee (design-decisions.md).
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         await _unitOfWork.CommitTransactionAsync(cancellationToken);
+        _logger.LogInformation(
+            "Stage {Stage}: reservation {ReservationId} for order {OrderId} committed (outbox row saved).",
+            "InventoryReservedOutboxEventSaved",
+            reservation.ReservationId,
+            request.OrderId);
+
+        // "Stock Sync Across Channels": both GET /inventory/{sku} and the gRPC availability RPC
+        // read through this same cache-aside store - invalidate every warehouse this reservation
+        // touched so neither channel serves a stale pre-debit value.
+        foreach (var (warehouseId, _) in allocations)
+        {
+            await _stockCache.InvalidateAsync(request.Sku, warehouseId, cancellationToken);
+        }
 
         return Result.Success(ReservationDto.FromDomain(reservation));
     }

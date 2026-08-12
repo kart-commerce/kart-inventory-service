@@ -15,10 +15,12 @@ public interface IReservationRepository
     Task<Reservation?> GetForUpdateAsync(Guid reservationId, CancellationToken cancellationToken);
 
     /// <summary>
-    /// database-design.md idx_reservations_order_id (partial, status = 'reserved') - the
-    /// OrderCancelled/OrderCompensationTriggered consumers' "find the live reservation(s) for
-    /// this orderId" lookup. Plain (non-locking) read - each returned reservation is locked
-    /// individually inside ReservationReleaseService.ReleaseAsync.
+    /// database-design.md idx_reservations_order_id (partial, status IN ('reserved','committed'))
+    /// - the OrderCancelled/OrderCompensationTriggered/OrderConfirmed consumers' "find the live
+    /// reservation(s) for this orderId" lookup. "Live" means Reserved OR Committed - a Committed
+    /// (paid) reservation must still be releasable on a later cancellation/compensation, and is a
+    /// safe idempotent no-op if handed to Commit again. Plain (non-locking) read - each returned
+    /// reservation is locked individually inside ReservationReleaseService/ReservationCommitService.
     /// </summary>
     Task<IReadOnlyList<Reservation>> GetReservedByOrderIdAsync(Guid orderId, CancellationToken cancellationToken);
 

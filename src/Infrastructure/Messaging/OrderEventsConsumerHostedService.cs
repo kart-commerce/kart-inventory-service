@@ -1,8 +1,10 @@
 using System.Text;
 using System.Text.Json;
 using Kart.Shared.Messaging;
+using Kart.Shared.Observability;
 using KartInventoryService.Application.Features.ConsumeOrderCancelled;
 using KartInventoryService.Application.Features.ConsumeOrderCompensationTriggered;
+using KartInventoryService.Application.Features.ConsumeOrderConfirmed;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -13,19 +15,24 @@ using RabbitMQ.Client.Events;
 namespace KartInventoryService.Infrastructure.Messaging;
 
 /// <summary>
-/// Consumes inventory.order-events.queue (bound to order.exchange's order.order.cancelled and
-/// order.order.compensation-triggered routing keys, per contracts/message-bus-manifest.json) and
-/// dispatches to INV-3/INV-4 via MediatR. On handler failure, walks the manifest's retry ladder
-/// (a custom retry-count header, since RabbitMQ has no built-in redelivery counter for this
-/// pattern) and dead-letters once every tier is exhausted - the same shape as
-/// kart-identity-service's UserDataErasedConsumerHostedService, generalized to switch on routing
-/// key since this queue carries two distinct event types.
+/// Consumes inventory.order-events.queue (bound to order.exchange's order.order.cancelled,
+/// order.order.compensation-triggered, and order.order.confirmed routing keys, per
+/// contracts/message-bus-manifest.json) and dispatches to the matching MediatR command. On
+/// handler failure, walks the manifest's retry ladder (a custom retry-count header, since
+/// RabbitMQ has no built-in redelivery counter for this pattern) and dead-letters once every tier
+/// is exhausted - the same shape as kart-identity-service's UserDataErasedConsumerHostedService,
+/// generalized to switch on routing key since this queue carries multiple distinct event types.
+/// Every dispatch runs under KartFlowContext.Push(InventoryStockManagement) and a
+/// StartConsumeActivity span so the originating publisher's trace continues unbroken through this
+/// hop (Kart flow-instrumentation standard).
 /// </summary>
 public sealed class OrderEventsConsumerHostedService : BackgroundService
 {
+    private const string FlowName = "InventoryStockManagement";
     private const string QueueName = "inventory.order-events.queue";
     private const string OrderCancelledRoutingKey = "order.order.cancelled";
     private const string OrderCompensationTriggeredRoutingKey = "order.order.compensation-triggered";
+    private const string OrderConfirmedRoutingKey = "order.order.confirmed";
     private const string RetryCountHeader = "x-inventory-retry-count";
 
     private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(10);
@@ -81,6 +88,9 @@ public sealed class OrderEventsConsumerHostedService : BackgroundService
 
     private async Task OnMessageReceivedAsync(IModel channel, BasicDeliverEventArgs deliverEventArgs, CancellationToken stoppingToken)
     {
+        using var _ = KartFlowContext.Push(FlowName);
+        using var activity = RabbitMqTraceContext.StartConsumeActivity(QueueName, deliverEventArgs.BasicProperties);
+
         try
         {
             using var scope = _scopeFactory.CreateScope();
@@ -92,13 +102,22 @@ public sealed class OrderEventsConsumerHostedService : BackgroundService
                 case OrderCancelledRoutingKey:
                     var cancelled = JsonSerializer.Deserialize<OrderCancelledEventPayload>(json, SerializerOptions)
                         ?? throw new InvalidOperationException("OrderCancelled payload deserialized to null.");
+                    _logger.LogInformation("Stage {Stage}: order {OrderId} cancelled.", "OrderCancelledConsumed", cancelled.OrderId);
                     await sender.Send(new ConsumeOrderCancelledCommand(cancelled.OrderId), stoppingToken);
                     break;
 
                 case OrderCompensationTriggeredRoutingKey:
                     var compensation = JsonSerializer.Deserialize<OrderCompensationTriggeredEventPayload>(json, SerializerOptions)
                         ?? throw new InvalidOperationException("OrderCompensationTriggered payload deserialized to null.");
+                    _logger.LogInformation("Stage {Stage}: order {OrderId} compensation triggered ({Reason}).", "OrderCompensationTriggeredConsumed", compensation.OrderId, compensation.Reason);
                     await sender.Send(new ConsumeOrderCompensationTriggeredCommand(compensation.OrderId, compensation.Reason), stoppingToken);
+                    break;
+
+                case OrderConfirmedRoutingKey:
+                    var confirmed = JsonSerializer.Deserialize<OrderConfirmedEventPayload>(json, SerializerOptions)
+                        ?? throw new InvalidOperationException("OrderConfirmed payload deserialized to null.");
+                    _logger.LogInformation("Stage {Stage}: order {OrderId} confirmed - committing reservations.", "OrderConfirmedConsumed", confirmed.OrderId);
+                    await sender.Send(new ConsumeOrderConfirmedCommand(confirmed.OrderId), stoppingToken);
                     break;
 
                 default:

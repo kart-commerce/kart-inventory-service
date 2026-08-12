@@ -10,4 +10,7 @@ public sealed class NullStockCache : IStockCache
 
     public Task SetAsync(string sku, string? warehouseId, StockLevelDto value, CancellationToken cancellationToken) =>
         Task.CompletedTask;
+
+    public Task InvalidateAsync(string sku, string warehouseId, CancellationToken cancellationToken) =>
+        Task.CompletedTask;
 }

@@ -13,7 +13,7 @@ public sealed class InventoryOutboxEventConfiguration : IEntityTypeConfiguration
         {
             t.HasCheckConstraint(
                 "CK_inventory_outbox_events_event_type",
-                "event_type IN ('InventoryReserved', 'InventoryReservationFailed', 'InventoryReleased', 'InventoryReplenished')");
+                "event_type IN ('InventoryReserved', 'InventoryReservationFailed', 'InventoryReleased', 'InventoryReplenished', 'InventoryCommitted', 'LowStockDetected', 'InventoryReconciled', 'WarehouseStockProvisioned')");
         });
 
         builder.HasKey(e => e.EventId);
@@ -26,6 +26,11 @@ public sealed class InventoryOutboxEventConfiguration : IEntityTypeConfiguration
         builder.Property(e => e.PublishedAt).HasColumnName("published_at");
         builder.Property(e => e.CreatedBy).HasColumnName("created_by").HasColumnType("text").IsRequired();
         builder.Property(e => e.UpdatedBy).HasColumnName("updated_by").HasColumnType("text").IsRequired();
+
+        // Kart flow-instrumentation standard: every outbox table needs this column so
+        // OutboxRelayHostedService (a background poller, unrelated async context) can continue
+        // the originating request's trace instead of starting a disconnected new one.
+        builder.Property(e => e.TraceParent).HasColumnName("trace_parent").HasColumnType("text");
 
         // Standard Outbox poller scan (BRD S11) - an index range-scan, not a full-table scan.
         builder.HasIndex(e => e.OccurredAt).HasDatabaseName("idx_inventory_outbox_unpublished").HasFilter("published_at IS NULL");

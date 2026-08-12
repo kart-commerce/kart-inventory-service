@@ -1,3 +1,4 @@
+using Kart.Shared.Observability;
 using KartInventoryService.Application.Common.Interfaces;
 using KartInventoryService.Application.Common.Options;
 using KartInventoryService.Application.Common.Services;
@@ -58,6 +59,7 @@ public sealed class SweepExpiredReservationsHostedService : BackgroundService
 
     private async Task SweepOnceAsync(CancellationToken cancellationToken)
     {
+        using var _ = KartFlowContext.Push("InventoryStockManagement");
         using var scope = _scopeFactory.CreateScope();
         var reservationRepository = scope.ServiceProvider.GetRequiredService<IReservationRepository>();
         var releaseService = scope.ServiceProvider.GetRequiredService<ReservationReleaseService>();
@@ -75,6 +77,9 @@ public sealed class SweepExpiredReservationsHostedService : BackgroundService
             await releaseService.ReleaseAsync(reservationId, ReservationReleaseReason.TtlExpiry, SystemPrincipal, cancellationToken);
         }
 
-        _logger.LogInformation("TTL sweep released {Count} expired reservation(s).", expiredIds.Count);
+        _logger.LogInformation(
+            "Stage {Stage}: TTL sweep released {Count} expired reservation(s).",
+            "ReservationExpirySwept",
+            expiredIds.Count);
     }
 }

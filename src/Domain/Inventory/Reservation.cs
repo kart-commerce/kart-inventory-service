@@ -94,15 +94,17 @@ public sealed class Reservation : DomainEventEmitter
 
     /// <summary>
     /// design-decisions.md "Release Idempotency & State Machine Design": idempotent regardless of
-    /// trigger. An already-terminal reservation is a no-op that still returns success -
-    /// <see cref="ReleaseOutcome.AlreadyTerminal"/> - and must NOT cause the caller to credit
-    /// WarehouseStock again or re-publish InventoryReleased. TtlExpiry transitions to Expired;
-    /// every other reason transitions to Released (database-design.md's status/release_reason
-    /// columns).
+    /// trigger. An already-terminal (Released/Expired) reservation is a no-op that still returns
+    /// success - <see cref="ReleaseOutcome.AlreadyTerminal"/> - and must NOT cause the caller to
+    /// credit WarehouseStock again or re-publish InventoryReleased. Reserved AND Committed are
+    /// both releasable (a paid order can still be admin-cancelled - Committed only opts a
+    /// reservation out of the TTL sweep, it does not make it un-cancellable). TtlExpiry
+    /// transitions to Expired; every other reason transitions to Released (database-design.md's
+    /// status/release_reason columns).
     /// </summary>
     public Result<ReleaseOutcome> Release(ReservationReleaseReason reason, string actingPrincipal, DateTimeOffset now)
     {
-        if (Status != ReservationStatus.Reserved)
+        if (Status == ReservationStatus.Released || Status == ReservationStatus.Expired)
         {
             return Result.Success(ReleaseOutcome.AlreadyTerminal);
         }
@@ -113,6 +115,25 @@ public sealed class Reservation : DomainEventEmitter
         Touch(actingPrincipal, now);
         Raise(new InventoryReleasedDomainEvent(OrderId, Sku, Qty, now));
         return Result.Success(ReleaseOutcome.Released);
+    }
+
+    /// <summary>
+    /// Inventory &amp; Stock Management flow's "Deduct (Order Confirmed)" stage: consuming
+    /// OrderConfirmed commits the reservation, opting it out of the TTL sweep. Idempotent - a
+    /// reservation that is already Committed, or has since raced to Released/Expired under
+    /// at-least-once delivery, is a silent no-op (never re-raises InventoryCommitted).
+    /// </summary>
+    public Result Commit(string actingPrincipal, DateTimeOffset now)
+    {
+        if (Status != ReservationStatus.Reserved)
+        {
+            return Result.Success();
+        }
+
+        Status = ReservationStatus.Committed;
+        Touch(actingPrincipal, now);
+        Raise(new InventoryCommittedDomainEvent(OrderId, Sku, Qty, now));
+        return Result.Success();
     }
 
     private void Touch(string actingPrincipal, DateTimeOffset now)
