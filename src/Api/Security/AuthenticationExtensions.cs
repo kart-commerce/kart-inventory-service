@@ -25,6 +25,9 @@ public static class AuthenticationExtensions
     public const string OrderServicePolicy = "OrderServiceOnly";
     public const string ReplenishPolicy = "ReplenishAuthorized";
 
+    /// <summary>Order Management (Admin) flow #7's read-only "Assign Warehouse" view (GET /v1/inventory/orders/{orderId}/allocations), called by kart-admin-service's own client-credentials principal — same shape as OrderServicePolicy but for Admin's `admin` role rather than order-service's `service:order` one.</summary>
+    public const string AdminOnlyPolicy = "AdminOnly";
+
     private const string RolesClaimType = "roles";
     private const string OrderServiceRoleValue = "service:order";
     private const string AdminRoleValue = "admin";
@@ -41,6 +44,12 @@ public static class AuthenticationExtensions
         services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
             .Configure<JwksSigningKeyResolver>((options, resolver) =>
             {
+                // Defensively disable .NET's default inbound claim-type remapping so the raw
+                // "roles" claim name survives verbatim (every policy below matches on it
+                // literally) - the same claim-remapping gap closed in kart-category-service and
+                // kart-order-service.
+                options.MapInboundClaims = false;
+
                 options.TokenValidationParameters = new TokenValidationParameters
                 {
                     // Identity's JwtAccessTokenGenerator sets neither `iss` nor `aud` on the
@@ -55,7 +64,8 @@ public static class AuthenticationExtensions
 
         services.AddAuthorizationBuilder()
             .AddPolicy(OrderServicePolicy, policy => policy.RequireClaim(RolesClaimType, OrderServiceRoleValue))
-            .AddPolicy(ReplenishPolicy, policy => policy.RequireClaim(RolesClaimType, AdminRoleValue, ReplenishTriggerRoleValue));
+            .AddPolicy(ReplenishPolicy, policy => policy.RequireClaim(RolesClaimType, AdminRoleValue, ReplenishTriggerRoleValue))
+            .AddPolicy(AdminOnlyPolicy, policy => policy.RequireClaim(RolesClaimType, AdminRoleValue));
 
         return services;
     }

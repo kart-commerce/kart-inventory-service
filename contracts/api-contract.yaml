@@ -208,6 +208,35 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Problem' }
 
+  /inventory/orders/{orderId}/allocations:
+    get:
+      operationId: getOrderAllocations
+      summary: Read-only warehouse-allocation view for an order (Order Management (Admin) flow's "Assign Warehouse" step).
+      description: >
+        Warehouse allocation itself stays fully automatic inside the reserve
+        saga (requirement-spec.md Decision 3's single-warehouse-first/
+        multi-warehouse-fallback logic) - this endpoint is admin visibility
+        into a decision the system already made, not a new admin override.
+        Called by kart-admin-service when rendering an order's detail screen.
+        Returns every reservation for the order regardless of status
+        (reserved/released/expired), so an admin can see which warehouse(s)
+        fulfilled a line item even after the reservation has since ended.
+      security:
+        - clientCredentials: [admin]
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Every reservation (any status) for this order, empty array if none were ever made.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Reservation' }
+
 components:
   securitySchemes:
     clientCredentials:

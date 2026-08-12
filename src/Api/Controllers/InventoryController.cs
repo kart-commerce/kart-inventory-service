@@ -1,13 +1,16 @@
 using KartInventoryService.Api.Common;
 using KartInventoryService.Api.Security;
 using KartInventoryService.Application.Common.Models;
+using KartInventoryService.Application.Features.GetOrderAllocations;
 using KartInventoryService.Application.Features.GetStockLevel;
 using KartInventoryService.Application.Features.ReleaseReservation;
 using KartInventoryService.Application.Features.ReplenishStock;
 using KartInventoryService.Application.Features.ReserveStock;
+using Kart.Shared.Observability;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace KartInventoryService.Api.Controllers;
 
@@ -16,10 +19,12 @@ namespace KartInventoryService.Api.Controllers;
 public sealed class InventoryController : ControllerBase
 {
     private readonly ISender _sender;
+    private readonly ILogger<InventoryController> _logger;
 
-    public InventoryController(ISender sender)
+    public InventoryController(ISender sender, ILogger<InventoryController> logger)
     {
         _sender = sender;
+        _logger = logger;
     }
 
     /// <summary>contracts/api-contract.yaml reserveStock - POST /v1/inventory/reserve (Order Service's saga step 1, RBAC-gated).</summary>
@@ -70,6 +75,26 @@ public sealed class InventoryController : ControllerBase
     {
         var result = await _sender.Send(new ReplenishStockCommand(request.WarehouseId, request.Sku, request.QtyAdded), cancellationToken);
         return this.ToActionResult<StockLevelDto, StockLevelDto>(result, stockLevel => Ok(stockLevel));
+    }
+
+    /// <summary>
+    /// Order Management (Admin) flow #7's "Assign Warehouse" view — read-only, called by
+    /// kart-admin-service when rendering an order's detail screen. Warehouse allocation itself is
+    /// fully automatic inside the reserve saga; this exposes the decision already made, it never
+    /// lets an admin override it.
+    /// </summary>
+    [HttpGet("orders/{orderId:guid}/allocations")]
+    [Authorize(Policy = AuthenticationExtensions.AdminOnlyPolicy)]
+    [ProducesResponseType(typeof(IReadOnlyList<ReservationDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<ReservationDto>>> GetOrderAllocations([FromRoute] Guid orderId, CancellationToken cancellationToken)
+    {
+        using var _ = KartFlowContext.Push("OrderManagementAdmin");
+        _logger.LogInformation("Stage {Stage}: order allocations requested for order {OrderId}", "InventoryAllocationLookupStarted", orderId);
+
+        var result = await _sender.Send(new GetOrderAllocationsQuery(orderId), cancellationToken);
+
+        _logger.LogInformation("Stage {Stage}: order allocations lookup completed for order {OrderId}", "InventoryAllocationLookupSucceeded", orderId);
+        return this.ToActionResult<IReadOnlyList<ReservationDto>, IReadOnlyList<ReservationDto>>(result, list => Ok(list));
     }
 }
 
