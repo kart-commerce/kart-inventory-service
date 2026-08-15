@@ -71,6 +71,11 @@ public sealed class ReserveStockCommandHandler : IRequestHandler<ReserveStockCom
         catch (LockAcquisitionTimeoutException)
         {
             await _unitOfWork.RollbackTransactionAsync(cancellationToken);
+            _logger.LogWarning(
+                "Stage {Stage}: reserve rejected, timed out waiting for a stock lock on sku {Sku} (order {OrderId}).",
+                "ReserveStockLockTimeout",
+                request.Sku,
+                request.OrderId);
             return Result.Failure<ReservationDto>(Error.LockTimeout(
                 $"Timed out waiting for a stock lock on '{request.Sku}' - retry."));
         }
@@ -78,6 +83,11 @@ public sealed class ReserveStockCommandHandler : IRequestHandler<ReserveStockCom
         if (candidates.Count == 0)
         {
             await _unitOfWork.RollbackTransactionAsync(cancellationToken);
+            _logger.LogWarning(
+                "Stage {Stage}: reserve rejected, no warehouse stock provisioned for sku {Sku} (order {OrderId}).",
+                "ReserveStockSkuNotProvisioned",
+                request.Sku,
+                request.OrderId);
             return Result.Failure<ReservationDto>(Error.NotFound($"No warehouse stock is provisioned for sku '{request.Sku}'."));
         }
 
@@ -126,6 +136,13 @@ public sealed class ReserveStockCommandHandler : IRequestHandler<ReserveStockCom
                 // Cannot happen given the totalAvailable check above under the row lock we hold -
                 // kept as a defensive Result-based guard rather than an assumption.
                 await _unitOfWork.RollbackTransactionAsync(cancellationToken);
+                _logger.LogWarning(
+                    "Stage {Stage}: reserve rejected, debit failed for warehouse {WarehouseId}, sku {Sku} (order {OrderId}): {Reason}.",
+                    "ReserveStockDebitFailed",
+                    warehouseId,
+                    request.Sku,
+                    request.OrderId,
+                    debitResult.Error.Message);
                 return Result.Failure<ReservationDto>(debitResult.Error);
             }
 
@@ -163,6 +180,12 @@ public sealed class ReserveStockCommandHandler : IRequestHandler<ReserveStockCom
         if (reservationResult.IsFailure)
         {
             await _unitOfWork.RollbackTransactionAsync(cancellationToken);
+            _logger.LogWarning(
+                "Stage {Stage}: reserve rejected, reservation creation failed for order {OrderId}, sku {Sku}: {Reason}.",
+                "ReserveStockReservationCreationFailed",
+                request.OrderId,
+                request.Sku,
+                reservationResult.Error.Message);
             return Result.Failure<ReservationDto>(reservationResult.Error);
         }
 

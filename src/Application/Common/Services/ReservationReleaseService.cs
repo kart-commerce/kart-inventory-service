@@ -60,6 +60,10 @@ public sealed class ReservationReleaseService
         if (reservation is null)
         {
             await _unitOfWork.RollbackTransactionAsync(cancellationToken);
+            _logger.LogWarning(
+                "Stage {Stage}: release rejected, reservation {ReservationId} not found.",
+                "ReservationReleaseNotFound",
+                reservationId);
             return Result.Failure<ReservationDto>(Error.NotFound($"Reservation '{reservationId}' not found."));
         }
 

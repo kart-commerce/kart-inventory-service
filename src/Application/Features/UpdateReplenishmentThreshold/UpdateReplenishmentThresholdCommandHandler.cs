@@ -47,6 +47,11 @@ public sealed class UpdateReplenishmentThresholdCommandHandler : IRequestHandler
         if (stock is null)
         {
             await _unitOfWork.RollbackTransactionAsync(cancellationToken);
+            _logger.LogWarning(
+                "Stage {Stage}: threshold update rejected, warehouse_stock for ({WarehouseId}, {Sku}) has never been provisioned.",
+                "UpdateReplenishmentThresholdNotProvisioned",
+                request.WarehouseId,
+                request.Sku);
             return Result.Failure<StockLevelDto>(Error.NotFound(
                 $"warehouse_stock for ({request.WarehouseId}, {request.Sku}) has never been provisioned."));
         }
@@ -55,6 +60,12 @@ public sealed class UpdateReplenishmentThresholdCommandHandler : IRequestHandler
         if (updateResult.IsFailure)
         {
             await _unitOfWork.RollbackTransactionAsync(cancellationToken);
+            _logger.LogWarning(
+                "Stage {Stage}: threshold update rejected for warehouse {WarehouseId}, sku {Sku}: {Reason}.",
+                "UpdateReplenishmentThresholdFailed",
+                request.WarehouseId,
+                request.Sku,
+                updateResult.Error.Message);
             return Result.Failure<StockLevelDto>(updateResult.Error);
         }
 

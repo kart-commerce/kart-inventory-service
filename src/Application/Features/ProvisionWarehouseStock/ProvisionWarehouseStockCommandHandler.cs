@@ -44,6 +44,11 @@ public sealed class ProvisionWarehouseStockCommandHandler : IRequestHandler<Prov
         var existing = await _repository.GetAsync(request.WarehouseId, request.Sku, cancellationToken);
         if (existing is not null)
         {
+            _logger.LogWarning(
+                "Stage {Stage}: provision rejected, warehouse_stock for ({WarehouseId}, {Sku}) has already been provisioned.",
+                "WarehouseStockAlreadyProvisioned",
+                request.WarehouseId,
+                request.Sku);
             return Result.Failure<StockLevelDto>(Error.Validation(
                 $"warehouse_stock for ({request.WarehouseId}, {request.Sku}) has already been provisioned."));
         }
@@ -59,6 +64,12 @@ public sealed class ProvisionWarehouseStockCommandHandler : IRequestHandler<Prov
 
         if (provisionResult.IsFailure)
         {
+            _logger.LogWarning(
+                "Stage {Stage}: provision rejected for warehouse {WarehouseId}, sku {Sku}: {Reason}.",
+                "WarehouseStockProvisionFailed",
+                request.WarehouseId,
+                request.Sku,
+                provisionResult.Error.Message);
             return Result.Failure<StockLevelDto>(provisionResult.Error);
         }
 

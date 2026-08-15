@@ -51,6 +51,11 @@ public sealed class ReplenishStockCommandHandler : IRequestHandler<ReplenishStoc
         if (stock is null)
         {
             await _unitOfWork.RollbackTransactionAsync(cancellationToken);
+            _logger.LogWarning(
+                "Stage {Stage}: replenish rejected, warehouse_stock for ({WarehouseId}, {Sku}) has never been provisioned.",
+                "ReplenishStockNotProvisioned",
+                request.WarehouseId,
+                request.Sku);
             return Result.Failure<StockLevelDto>(Error.NotFound(
                 $"warehouse_stock for ({request.WarehouseId}, {request.Sku}) has never been provisioned."));
         }
@@ -59,6 +64,12 @@ public sealed class ReplenishStockCommandHandler : IRequestHandler<ReplenishStoc
         if (replenishResult.IsFailure)
         {
             await _unitOfWork.RollbackTransactionAsync(cancellationToken);
+            _logger.LogWarning(
+                "Stage {Stage}: replenish rejected for warehouse {WarehouseId}, sku {Sku}: {Reason}.",
+                "ReplenishStockFailed",
+                request.WarehouseId,
+                request.Sku,
+                replenishResult.Error.Message);
             return Result.Failure<StockLevelDto>(replenishResult.Error);
         }
 

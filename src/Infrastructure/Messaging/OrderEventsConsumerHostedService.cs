@@ -105,6 +105,7 @@ public sealed class OrderEventsConsumerHostedService : BackgroundService
                     var cancelled = JsonSerializer.Deserialize<OrderCancelledEventPayload>(json, SerializerOptions)
                         ?? throw new InvalidOperationException("OrderCancelled payload deserialized to null.");
                     _logger.LogInformation("Stage {Stage}: order {OrderId} cancelled.", "OrderCancelledConsumed", cancelled.OrderId);
+                    _logger.LogInformation("Stage {Stage}: dispatching ConsumeOrderCancelledCommand for order {OrderId}.", "ConsumeOrderCancelledCommandDispatched", cancelled.OrderId);
                     await sender.Send(new ConsumeOrderCancelledCommand(cancelled.OrderId), stoppingToken);
                     break;
 
@@ -112,6 +113,7 @@ public sealed class OrderEventsConsumerHostedService : BackgroundService
                     var compensation = JsonSerializer.Deserialize<OrderCompensationTriggeredEventPayload>(json, SerializerOptions)
                         ?? throw new InvalidOperationException("OrderCompensationTriggered payload deserialized to null.");
                     _logger.LogInformation("Stage {Stage}: order {OrderId} compensation triggered ({Reason}).", "OrderCompensationTriggeredConsumed", compensation.OrderId, compensation.Reason);
+                    _logger.LogInformation("Stage {Stage}: dispatching ConsumeOrderCompensationTriggeredCommand for order {OrderId}.", "ConsumeOrderCompensationTriggeredCommandDispatched", compensation.OrderId);
                     await sender.Send(new ConsumeOrderCompensationTriggeredCommand(compensation.OrderId, compensation.Reason), stoppingToken);
                     break;
 
@@ -119,6 +121,7 @@ public sealed class OrderEventsConsumerHostedService : BackgroundService
                     var confirmed = JsonSerializer.Deserialize<OrderConfirmedEventPayload>(json, SerializerOptions)
                         ?? throw new InvalidOperationException("OrderConfirmed payload deserialized to null.");
                     _logger.LogInformation("Stage {Stage}: order {OrderId} confirmed - committing reservations.", "OrderConfirmedConsumed", confirmed.OrderId);
+                    _logger.LogInformation("Stage {Stage}: dispatching ConsumeOrderConfirmedCommand for order {OrderId}.", "ConsumeOrderConfirmedCommandDispatched", confirmed.OrderId);
                     await sender.Send(new ConsumeOrderConfirmedCommand(confirmed.OrderId), stoppingToken);
                     break;
 

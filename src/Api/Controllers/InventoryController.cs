@@ -44,6 +44,7 @@ public sealed class InventoryController : ControllerBase
         using var _ = KartFlowContext.Push(FlowName);
         _logger.LogInformation("Stage {Stage}: reserve received for order {OrderId}, sku {Sku}.", "InventoryReserveRequested", request.OrderId, request.Sku);
 
+        _logger.LogInformation("Stage {Stage}: dispatching ReserveStockCommand for order {OrderId}, sku {Sku}.", "ReserveStockCommandDispatched", request.OrderId, request.Sku);
         var result = await _sender.Send(new ReserveStockCommand(request.OrderId, request.Sku, request.Qty), cancellationToken);
 
         if (result.IsSuccess)
@@ -66,6 +67,7 @@ public sealed class InventoryController : ControllerBase
         using var _ = KartFlowContext.Push(FlowName);
         _logger.LogInformation("Stage {Stage}: release received for reservation {ReservationId}.", "InventoryReleaseRequested", request.ReservationId);
 
+        _logger.LogInformation("Stage {Stage}: dispatching ReleaseReservationCommand for reservation {ReservationId}.", "ReleaseReservationCommandDispatched", request.ReservationId);
         var result = await _sender.Send(new ReleaseReservationCommand(request.ReservationId), cancellationToken);
 
         if (result.IsSuccess)
@@ -109,6 +111,9 @@ public sealed class InventoryController : ControllerBase
     public async Task<ActionResult<StockLevelDto>> ReplenishStock([FromBody] ReplenishStockRequest request, CancellationToken cancellationToken)
     {
         using var _ = KartFlowContext.Push(FlowName);
+        _logger.LogInformation("Stage {Stage}: replenish received for warehouse {WarehouseId}, sku {Sku}, qty {QtyAdded}.", "ReplenishStockRequestReceived", request.WarehouseId, request.Sku, request.QtyAdded);
+
+        _logger.LogInformation("Stage {Stage}: dispatching ReplenishStockCommand for warehouse {WarehouseId}, sku {Sku}.", "ReplenishStockCommandDispatched", request.WarehouseId, request.Sku);
         var result = await _sender.Send(new ReplenishStockCommand(request.WarehouseId, request.Sku, request.QtyAdded), cancellationToken);
         return this.ToActionResult<StockLevelDto, StockLevelDto>(result, stockLevel => Ok(stockLevel));
     }
@@ -125,6 +130,9 @@ public sealed class InventoryController : ControllerBase
     public async Task<ActionResult<StockLevelDto>> ProvisionWarehouseStock([FromBody] ProvisionWarehouseStockRequest request, CancellationToken cancellationToken)
     {
         using var _ = KartFlowContext.Push(FlowName);
+        _logger.LogInformation("Stage {Stage}: provision received for warehouse {WarehouseId}, sku {Sku}.", "ProvisionWarehouseStockRequestReceived", request.WarehouseId, request.Sku);
+
+        _logger.LogInformation("Stage {Stage}: dispatching ProvisionWarehouseStockCommand for warehouse {WarehouseId}, sku {Sku}.", "ProvisionWarehouseStockCommandDispatched", request.WarehouseId, request.Sku);
         var result = await _sender.Send(
             new ProvisionWarehouseStockCommand(request.WarehouseId, request.Sku, request.InitialQty, request.ReplenishmentThreshold, request.TargetStockingLevel),
             cancellationToken);
@@ -145,6 +153,9 @@ public sealed class InventoryController : ControllerBase
         CancellationToken cancellationToken)
     {
         using var _ = KartFlowContext.Push(FlowName);
+        _logger.LogInformation("Stage {Stage}: threshold update received for warehouse {WarehouseId}, sku {Sku}.", "UpdateReplenishmentThresholdRequestReceived", warehouseId, sku);
+
+        _logger.LogInformation("Stage {Stage}: dispatching UpdateReplenishmentThresholdCommand for warehouse {WarehouseId}, sku {Sku}.", "UpdateReplenishmentThresholdCommandDispatched", warehouseId, sku);
         var result = await _sender.Send(
             new UpdateReplenishmentThresholdCommand(warehouseId, sku, request.ReplenishmentThreshold, request.TargetStockingLevel),
             cancellationToken);
@@ -163,6 +174,9 @@ public sealed class InventoryController : ControllerBase
         CancellationToken cancellationToken)
     {
         using var _ = KartFlowContext.Push(FlowName);
+        _logger.LogInformation("Stage {Stage}: reconciliation received for warehouse {WarehouseId}, sku {Sku}, counted qty {CountedQty}.", "ReconcileStockRequestReceived", warehouseId, sku, request.CountedQty);
+
+        _logger.LogInformation("Stage {Stage}: dispatching ReconcileStockCommand for warehouse {WarehouseId}, sku {Sku}.", "ReconcileStockCommandDispatched", warehouseId, sku);
         var result = await _sender.Send(new ReconcileStockCommand(warehouseId, sku, request.CountedQty, request.Reason), cancellationToken);
         return this.ToActionResult<StockReconciliationResultDto, StockReconciliationResultDto>(result, dto => Ok(dto));
     }

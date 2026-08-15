@@ -42,6 +42,11 @@ public sealed class ReservationCommitService
             if (locked is null)
             {
                 await _unitOfWork.RollbackTransactionAsync(cancellationToken);
+                _logger.LogWarning(
+                    "Stage {Stage}: order {OrderId} reservation {ReservationId} vanished before its commit lock could be acquired; skipping.",
+                    "ReservationCommitNoOp",
+                    orderId,
+                    reservation.ReservationId);
                 continue;
             }
 

@@ -50,6 +50,11 @@ public sealed class ReconcileStockCommandHandler : IRequestHandler<ReconcileStoc
         if (stock is null)
         {
             await _unitOfWork.RollbackTransactionAsync(cancellationToken);
+            _logger.LogWarning(
+                "Stage {Stage}: reconciliation rejected, warehouse_stock for ({WarehouseId}, {Sku}) has never been provisioned.",
+                "ReconcileStockNotProvisioned",
+                request.WarehouseId,
+                request.Sku);
             return Result.Failure<StockReconciliationResultDto>(Error.NotFound(
                 $"warehouse_stock for ({request.WarehouseId}, {request.Sku}) has never been provisioned."));
         }
@@ -59,6 +64,12 @@ public sealed class ReconcileStockCommandHandler : IRequestHandler<ReconcileStoc
         if (reconcileResult.IsFailure)
         {
             await _unitOfWork.RollbackTransactionAsync(cancellationToken);
+            _logger.LogWarning(
+                "Stage {Stage}: reconciliation rejected for warehouse {WarehouseId}, sku {Sku}: {Reason}.",
+                "ReconcileStockFailed",
+                request.WarehouseId,
+                request.Sku,
+                reconcileResult.Error.Message);
             return Result.Failure<StockReconciliationResultDto>(reconcileResult.Error);
         }
 
