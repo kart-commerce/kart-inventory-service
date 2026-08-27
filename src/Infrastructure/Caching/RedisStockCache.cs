@@ -31,7 +31,7 @@ public sealed class RedisStockCache : IStockCache
         var database = _connectionMultiplexer.GetDatabase();
         var value = await database.StringGetAsync(Key(sku, warehouseId));
         return value.HasValue
-            ? JsonSerializer.Deserialize<StockLevelDto>(value!, SerializerOptions)
+            ? JsonSerializer.Deserialize<StockLevelDto>((string)value!, SerializerOptions)
             : null;
     }
 
