@@ -84,7 +84,7 @@ namespace KartInventoryService.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("OrderId")
                         .HasDatabaseName("idx_reservations_order_id")
-                        .HasFilter("status = 'reserved'");
+                        .HasFilter("status IN ('reserved', 'committed')");
 
                     b.ToTable("reservations", null, t =>
                         {
@@ -92,7 +92,7 @@ namespace KartInventoryService.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("CK_reservations_release_reason", "release_reason IS NULL OR release_reason IN ('explicit_call', 'order_cancelled', 'compensation_triggered', 'ttl_expiry')");
 
-                            t.HasCheckConstraint("CK_reservations_status", "status IN ('reserved', 'released', 'expired')");
+                            t.HasCheckConstraint("CK_reservations_status", "status IN ('reserved', 'committed', 'released', 'expired')");
                         });
                 });
 
@@ -250,6 +250,10 @@ namespace KartInventoryService.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("published_at");
 
+                    b.Property<string>("TraceParent")
+                        .HasColumnType("text")
+                        .HasColumnName("trace_parent");
+
                     b.Property<string>("UpdatedBy")
                         .IsRequired()
                         .HasColumnType("text")
@@ -263,7 +267,7 @@ namespace KartInventoryService.Infrastructure.Persistence.Migrations
 
                     b.ToTable("inventory_outbox_events", null, t =>
                         {
-                            t.HasCheckConstraint("CK_inventory_outbox_events_event_type", "event_type IN ('InventoryReserved', 'InventoryReservationFailed', 'InventoryReleased', 'InventoryReplenished')");
+                            t.HasCheckConstraint("CK_inventory_outbox_events_event_type", "event_type IN ('InventoryReserved', 'InventoryReservationFailed', 'InventoryReleased', 'InventoryReplenished', 'InventoryCommitted', 'LowStockDetected', 'InventoryReconciled', 'WarehouseStockProvisioned')");
                         });
                 });
 

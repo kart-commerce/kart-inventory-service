@@ -26,4 +26,21 @@ public sealed class InMemoryWarehouseStockRepository : IWarehouseStockRepository
 
     public Task<WarehouseStock?> GetForUpdateAsync(string warehouseId, string sku, CancellationToken cancellationToken) =>
         Task.FromResult(_stocks.GetValueOrDefault((warehouseId, sku)));
+
+    public Task AddAsync(WarehouseStock stock, CancellationToken cancellationToken)
+    {
+        Seed(stock);
+        return Task.CompletedTask;
+    }
+
+    public Task<IReadOnlyList<WarehouseStock>> GetLowStockAsync(string? warehouseId, CancellationToken cancellationToken)
+    {
+        var query = _stocks.Values.Where(s => s.AvailableQty < s.ReplenishmentThreshold);
+        if (warehouseId is not null)
+        {
+            query = query.Where(s => s.WarehouseId == warehouseId);
+        }
+
+        return Task.FromResult<IReadOnlyList<WarehouseStock>>(query.OrderBy(s => s.WarehouseId).ThenBy(s => s.Sku).ToList());
+    }
 }

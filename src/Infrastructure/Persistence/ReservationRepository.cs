@@ -35,7 +35,7 @@ public sealed class ReservationRepository : IReservationRepository
     public async Task<IReadOnlyList<Reservation>> GetReservedByOrderIdAsync(Guid orderId, CancellationToken cancellationToken) =>
         await _dbContext.Reservations
             .AsNoTracking()
-            .Where(r => r.OrderId == orderId && r.Status == ReservationStatus.Reserved)
+            .Where(r => r.OrderId == orderId && (r.Status == ReservationStatus.Reserved || r.Status == ReservationStatus.Committed))
             .ToListAsync(cancellationToken);
 
     public async Task<IReadOnlyList<Guid>> GetExpiredReservationIdsAsync(DateTimeOffset asOf, int batchSize, CancellationToken cancellationToken) =>

@@ -1,5 +1,6 @@
 using System.Text;
 using Kart.Shared.Messaging;
+using Kart.Shared.Observability;
 using KartInventoryService.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,10 +14,16 @@ namespace KartInventoryService.Infrastructure.Messaging;
 /// Relays inventory_outbox_events rows to inventory.exchange (design-decisions.md, "Event Publish
 /// Atomicity"). Re-declares the manifest's topology idempotently on every (re)connect. Connects
 /// lazily with its own retry loop so a RabbitMQ outage degrades publish latency, never crashes the
-/// Api process. Mirrors kart-category-service's OutboxRelayHostedService exactly.
+/// Api process. Mirrors kart-category-service's OutboxRelayHostedService exactly. Every service's
+/// outbox event belongs to this one flow (unlike admin-service's multi-flow relay, which needs a
+/// per-action map) - the flow tag is unconditional. Publishes under
+/// StartPublishActivityFromStoredTraceParent so the relay - a background poller, seconds later, on
+/// an async context wholly unrelated to the original request - continues that request's trace
+/// rather than starting a disconnected new one.
 /// </summary>
 public sealed class OutboxRelayHostedService : BackgroundService
 {
+    private const string FlowName = "InventoryStockManagement";
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(10);
     private const int BatchSize = 50;
@@ -73,8 +80,10 @@ public sealed class OutboxRelayHostedService : BackgroundService
 
     private async Task RelayPendingBatchAsync(IModel channel, CancellationToken cancellationToken)
     {
+        using var _ = KartFlowContext.Push(FlowName);
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<InventoryDbContext>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<OutboxRelayHostedService>>();
 
         var pending = await dbContext.OutboxEvents
             .Where(e => e.PublishedAt == null)
@@ -94,13 +103,27 @@ public sealed class OutboxRelayHostedService : BackgroundService
             properties.MessageId = outboxEvent.EventId.ToString();
             properties.ContentType = "application/json";
 
+            var exchange = _manifest.ExchangeFor(outboxEvent.EventType);
+            var routingKey = _manifest.RoutingKeyFor(outboxEvent.EventType);
+
+            using var activity = RabbitMqTraceContext.StartPublishActivityFromStoredTraceParent(
+                exchange, routingKey, outboxEvent.TraceParent, properties);
+
             channel.BasicPublish(
-                exchange: _manifest.ExchangeFor(outboxEvent.EventType),
-                routingKey: _manifest.RoutingKeyFor(outboxEvent.EventType),
+                exchange: exchange,
+                routingKey: routingKey,
                 basicProperties: properties,
                 body: Encoding.UTF8.GetBytes(outboxEvent.Payload));
 
             outboxEvent.MarkPublished(DateTimeOffset.UtcNow);
+
+            logger.LogInformation(
+                "Stage {Stage}: {EventType} published to {Exchange}/{RoutingKey} (event {EventId}).",
+                "OutboxEventPublished",
+                outboxEvent.EventType,
+                exchange,
+                routingKey,
+                outboxEvent.EventId);
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);

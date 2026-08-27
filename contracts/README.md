@@ -3,9 +3,11 @@
 Vendored, read-only copies of this service's approved design artifacts from
 `kart-platform/docs/services/kart-inventory-service/`:
 
-- `api-contract.yaml` - the REST + internal gRPC contract (with one addendum documented in its
-  own header - `POST /inventory/replenish`, which the upstream artifact never actually defined a
-  path for despite requiring it).
+- `api-contract.yaml` - the REST + internal gRPC contract (with two addenda documented in its own
+  header - `POST /inventory/replenish`, which the upstream artifact never actually defined a path
+  for despite requiring it; and, from the Inventory & Stock Management flow, `POST
+  /inventory/provision`, `PATCH /inventory/{warehouseId}/{sku}/threshold`, `POST
+  /inventory/{warehouseId}/{sku}/reconcile`, and `GET /inventory/low-stock`).
 - `message-bus-manifest.json` - the **single source of truth** for this service's entire RabbitMQ
   topology. `Infrastructure/Messaging/RabbitMqTopologyProvisioner` declares every exchange, queue,
   binding, dead-letter queue, and retry-tier queue directly from this file at startup - nothing

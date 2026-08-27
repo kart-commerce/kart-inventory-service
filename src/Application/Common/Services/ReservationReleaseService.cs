@@ -20,6 +20,7 @@ public sealed class ReservationReleaseService
     private readonly IReservationRepository _reservationRepository;
     private readonly IWarehouseStockRepository _stockRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IStockCache _stockCache;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<ReservationReleaseService> _logger;
 
@@ -27,12 +28,14 @@ public sealed class ReservationReleaseService
         IReservationRepository reservationRepository,
         IWarehouseStockRepository stockRepository,
         IUnitOfWork unitOfWork,
+        IStockCache stockCache,
         TimeProvider timeProvider,
         ILogger<ReservationReleaseService> logger)
     {
         _reservationRepository = reservationRepository;
         _stockRepository = stockRepository;
         _unitOfWork = unitOfWork;
+        _stockCache = stockCache;
         _timeProvider = timeProvider;
         _logger = logger;
     }
@@ -45,12 +48,22 @@ public sealed class ReservationReleaseService
     {
         var now = _timeProvider.GetUtcNow();
 
+        _logger.LogInformation(
+            "Stage {Stage}: releasing reservation {ReservationId}, reason {Reason}.",
+            "ReservationReleaseStarted",
+            reservationId,
+            reason);
+
         await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
         var reservation = await _reservationRepository.GetForUpdateAsync(reservationId, cancellationToken);
         if (reservation is null)
         {
             await _unitOfWork.RollbackTransactionAsync(cancellationToken);
+            _logger.LogWarning(
+                "Stage {Stage}: release rejected, reservation {ReservationId} not found.",
+                "ReservationReleaseNotFound",
+                reservationId);
             return Result.Failure<ReservationDto>(Error.NotFound($"Reservation '{reservationId}' not found."));
         }
 
@@ -75,10 +88,37 @@ public sealed class ReservationReleaseService
 
                 stock.Credit(allocation.Qty, actingPrincipal, now);
             }
+
+            _logger.LogInformation(
+                "Stage {Stage}: reservation {ReservationId} released, {AllocationCount} warehouse allocation(s) credited back.",
+                "WarehouseStockCredited",
+                reservationId,
+                reservation.Allocations.Count);
+        }
+        else
+        {
+            _logger.LogInformation(
+                "Stage {Stage}: reservation {ReservationId} was already terminal - no-op.",
+                "ReservationReleaseNoOp",
+                reservationId);
         }
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         await _unitOfWork.CommitTransactionAsync(cancellationToken);
+
+        if (releaseResult.Value == ReleaseOutcome.Released)
+        {
+            _logger.LogInformation(
+                "Stage {Stage}: reservation {ReservationId} release committed (outbox row saved).",
+                "InventoryReleasedOutboxEventSaved",
+                reservationId);
+
+            // "Stock Sync Across Channels" - see ReserveStockCommandHandler's identical call.
+            foreach (var allocation in reservation.Allocations)
+            {
+                await _stockCache.InvalidateAsync(reservation.Sku, allocation.WarehouseId, cancellationToken);
+            }
+        }
 
         return Result.Success(ReservationDto.FromDomain(reservation));
     }

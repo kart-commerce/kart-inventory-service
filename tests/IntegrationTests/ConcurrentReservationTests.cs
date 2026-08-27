@@ -84,6 +84,7 @@ public class ConcurrentReservationTests
             reservationRepository,
             unitOfWork,
             outboxEventWriter,
+            new NullStockCache(),
             currentPrincipal,
             TimeProvider.System,
             options,

@@ -55,4 +55,18 @@ public sealed class WarehouseStockRepository : IWarehouseStockRepository
             throw new LockAcquisitionTimeoutException($"Timed out waiting for a stock lock on ({warehouseId}, {sku}).", ex);
         }
     }
+
+    public async Task AddAsync(WarehouseStock stock, CancellationToken cancellationToken) =>
+        await _dbContext.WarehouseStocks.AddAsync(stock, cancellationToken);
+
+    public async Task<IReadOnlyList<WarehouseStock>> GetLowStockAsync(string? warehouseId, CancellationToken cancellationToken)
+    {
+        var query = _dbContext.WarehouseStocks.AsNoTracking().Where(s => s.AvailableQty < s.ReplenishmentThreshold);
+        if (warehouseId is not null)
+        {
+            query = query.Where(s => s.WarehouseId == warehouseId);
+        }
+
+        return await query.OrderBy(s => s.WarehouseId).ThenBy(s => s.Sku).ToListAsync(cancellationToken);
+    }
 }

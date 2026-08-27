@@ -30,4 +30,14 @@ public interface IWarehouseStockRepository
     /// touch exactly one row per warehouse rather than every candidate row for a SKU.
     /// </summary>
     Task<WarehouseStock?> GetForUpdateAsync(string warehouseId, string sku, CancellationToken cancellationToken);
+
+    /// <summary>Onboards a brand-new (WarehouseId, Sku) row - ProvisionWarehouseStockCommand's write path.</summary>
+    Task AddAsync(WarehouseStock stock, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Inventory &amp; Stock Management flow's "Reorder Alert" dashboard view - every warehouse_stock
+    /// row currently below its own ReplenishmentThreshold, optionally scoped to one warehouse.
+    /// Plain (non-locking) read, same unconditional-read posture as GetStockLevel.
+    /// </summary>
+    Task<IReadOnlyList<WarehouseStock>> GetLowStockAsync(string? warehouseId, CancellationToken cancellationToken);
 }

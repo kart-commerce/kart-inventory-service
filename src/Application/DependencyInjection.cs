@@ -27,6 +27,10 @@ public static class DependencyInjection
         // concrete types, so it belongs here rather than in a MediatR handler.
         services.AddScoped<ReservationReleaseService>();
 
+        // Inventory & Stock Management flow's "Deduct (Order Confirmed)" counterpart to the
+        // release service above.
+        services.AddScoped<ReservationCommitService>();
+
         return services;
     }
 }
